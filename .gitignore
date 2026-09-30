@@ -1,0 +1,16 @@
+# ключ сервисного аккаунта Google — никогда не коммитить
+google_key.json
+*.json
+
+# кеш ФНС/Checko: ФИО директоров, личные почты и телефоны
+cache_*.json
+cache_*.lock
+*.tmp
+
+# логи и выгрузки
+*.log
+*.xlsx
+*.csv
+
+__pycache__/
+.DS_Store

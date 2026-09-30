@@ -1,0 +1,5 @@
+scrapling[fetchers]
+pymupdf
+openpyxl
+gspread
+google-auth
