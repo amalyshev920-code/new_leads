@@ -223,8 +223,56 @@ def field(text, label, stop):
     return "" if v in ("—", "-") else v
 
 
+CHECKO_KEY = None        # ключ API Checko из checko_key.txt; без него — страница сайта
+CHECKO_DAILY = 100       # бесплатный лимит API в сутки
+checko_used = 0
+
+
+class CheckoLimit(Exception):
+    pass
+
+
+def as_list(v):
+    if not v:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def checko_api(o):
+    """Контакты через официальный API Checko: без капч и банов, 100 запросов в день бесплатно."""
+    global checko_used
+    if checko_used >= CHECKO_DAILY - 2:
+        raise CheckoLimit()
+    url = "https://api.checko.ru/v2/company?" + urllib.parse.urlencode({"key": CHECKO_KEY, "ogrn": o})
+    try:
+        r = json.load(urllib.request.urlopen(url, timeout=30))
+    except Exception as e:
+        log(f"  {o}: API Checko — {type(e).__name__}")
+        return None
+    meta = r.get("meta", {})
+    checko_used = meta.get("today_request_count", checko_used + 1)
+    if meta.get("status") != "ok":
+        log(f"  API Checko: {meta.get('message') or meta}")
+        if "лимит" in str(meta).lower() or "limit" in str(meta).lower():
+            raise CheckoLimit()
+        return None
+    k = (r.get("data") or {}).get("Контакты") or {}
+    phones = [str(x) for x in as_list(k.get("Тел"))]
+    mails = [str(x) for x in as_list(k.get("Емэйл"))]
+    sites = [re.sub(r"^https?://(www\.)?", "", str(x)).strip("/") for x in as_list(k.get("ВебСайт"))]
+    return {"телефон": "; ".join(phones[:3]), "почта": "; ".join(mails[:2]),
+            "сайт": sites[0] if sites else "", "_ts": dt.date.today().isoformat()}
+
+
 def checko(o):
-    """Контакты из Checko. Checko режет частые запросы — при 429 ждём и повторяем."""
+    """Контакты из Checko: через API, если есть ключ, иначе со страницы компании."""
+    if CHECKO_KEY:
+        return checko_api(o)
+    return checko_page(o)
+
+
+def checko_page(o):
+    """Страница компании на Checko. Сайт режет частые запросы — при 429 ждём и повторяем."""
     for attempt in range(4):
         status, html = fetch(f"https://checko.ru/company/{o}")
         t = plain(html) if status == 200 else ""
@@ -472,14 +520,19 @@ def contacts(targets, cache, gis_city=None, recheck=0):
             if not stop:
                 if c is not None:
                     rechecks += 1
-                fresh = checko(r["огрн"])
+                try:
+                    fresh = checko(r["огрн"])
+                except CheckoLimit:
+                    log(f"  Дневной лимит API Checko ({CHECKO_DAILY}) исчерпан — остальных проверю завтра")
+                    stop = True
+                    fresh = None
                 if fresh is not None:
                     c = fresh
                     cache.put("checko", r["огрн"], c)
                     fails = 0
-                else:
+                elif not stop:
                     fails += 1
-                time.sleep(2.5)
+                time.sleep(0.5 if CHECKO_KEY else 2.5)
         checked = c is not None
         c = c or {}
         r.update({k: c.get(k, "") for k in ("телефон", "почта", "сайт")})
@@ -541,11 +594,16 @@ def main():
     except BlockingIOError:
         sys.exit(f"По региону {a.region} уже идёт другой прогон — дождитесь его конца.")
     cache = Cache(os.path.join(here, f"cache_{a.region:02d}.json"))
+    global CHECKO_KEY
+    key_path = os.path.join(here, "checko_key.txt")
+    if os.path.exists(key_path):
+        CHECKO_KEY = open(key_path).read().strip()
+        log("Контакты: API Checko")
     log(f"=== {dt.datetime.now():%d.%m.%Y %H:%M} · регион {a.region} · {since:%d.%m.%Y} – {until:%d.%m.%Y} ===")
 
     companies = collect(a.region, since, until, cache, a.limit)
     targets = enrich(companies, cache, a.all)
-    contacts(targets, cache, a.gis, recheck=20 if a.daily else 0)
+    contacts(targets, cache, a.gis, recheck=(40 if CHECKO_KEY else 20) if a.daily else 0)
 
     leads = [r for r in targets if r["пометка"] == "сайта нет" and (r["телефон"] or r["почта"])]
     meta = {"регион": a.region, "период": f"{since:%d.%m.%Y} – {until:%d.%m.%Y}",
