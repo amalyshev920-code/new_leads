@@ -1,0 +1,10 @@
+{
+  "region": 25,
+  "sheet_id": "id Google-таблицы: часть ссылки между /d/ и /edit",
+  "gis_city": null,
+  "mail_dir": "~/Desktop/Work/rassylka",
+  "mail_lists": ["companies.csv", "wave3_oct.csv"],
+  "sender": "Артём",
+  "smtp_user": "",
+  "test_to": ""
+}

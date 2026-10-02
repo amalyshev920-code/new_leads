@@ -1,0 +1,7 @@
+#!/bin/bash
+# leads — обёртка: находит Python с нужными библиотеками и запускает leads.py
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+for PY in "$LEADS_PYTHON" "$DIR/.venv/bin/python" "$HOME/.local/venvs/scrapling/bin/python" python3; do
+  [ -n "$PY" ] && command -v "$PY" >/dev/null 2>&1 && break
+done
+exec "$PY" -W ignore "$DIR/leads.py" "$@"

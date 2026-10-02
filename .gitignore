@@ -15,3 +15,9 @@ cache_*.lock
 
 __pycache__/
 .DS_Store
+
+# образец настроек — в репозиторий
+!config.example.json
+# локальные настройки (id таблицы, почта) — нет
+config.json
+.venv/

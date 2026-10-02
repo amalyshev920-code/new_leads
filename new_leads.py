@@ -31,6 +31,8 @@
 import argparse, csv, datetime as dt, fcntl, json, os, re, sys, time, urllib.parse, urllib.request
 
 from scrapling.fetchers import Fetcher
+import logging
+logging.getLogger("scrapling").setLevel(logging.CRITICAL)   # «INFO: Fetched…» на каждый запрос — шум
 
 H = {"User-Agent": "Mozilla/5.0", "X-Requested-With": "XMLHttpRequest"}
 CA = "/etc/ssl/cert.pem" if os.path.exists("/etc/ssl/cert.pem") else True
