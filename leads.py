@@ -150,6 +150,22 @@ def test(cfg):
 def send(cfg):
     smtp_setup(cfg)
     import outreach
+    from datetime import date, timedelta
+    # сначала общий план — чтобы «к отправке 2» по одному файлу не путало
+    cutoff = (date.today() - timedelta(days=outreach.FOLLOWUP_AFTER_DAYS)).isoformat()
+    plan, room = [], outreach.LIMIT_PER_RUN
+    for followup in (True, False):
+        for path in mail_lists(cfg):
+            rows, _ = outreach.read_rows(str(path))
+            n = sum(1 for r in rows if r["email"].strip() and (
+                r["status"] == "отправлено" and r["sent_at"] <= cutoff if followup else not r["status"].strip()))
+            n = min(n, room)
+            if n:
+                plan.append(f"{path.stem} — {n}" + (" (повтор)" if followup else ""))
+                room -= n
+    total = outreach.LIMIT_PER_RUN - room
+    if total:
+        print(f"Уйдёт писем: {total} ({', '.join(plan)}). Пауза между письмами ~4 мин, всего ~{total * 4} мин.\n")
     left, sheet, first = outreach.LIMIT_PER_RUN, None, True
     for followup in (True, False):            # сначала повторы — им уже пора, потом новые
         for path in mail_lists(cfg):
