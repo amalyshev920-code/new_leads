@@ -211,23 +211,39 @@ class Sheet:
             print(f"  ⚠ Google-таблица недоступна ({type(e).__name__}: {e}) — статусы не пишутся, потом: sync")
             self.ws = None
 
+    def _call(self, fn, *args):
+        """Запрос к таблице с повтором: у Google лимит ~60 запросов в минуту."""
+        for attempt in range(5):
+            try:
+                return fn(*args)
+            except Exception as e:
+                if "429" not in str(e) and "Quota" not in str(e) or attempt == 4:
+                    raise
+                time.sleep(20 * (attempt + 1))
+
     def mark(self, email: str, note: str) -> None:
         if not self.ws:
             return
         try:
-            mails = self.ws.col_values(self.col["Почта"])
-            rows = [i for i, m in enumerate(mails, 1)
+            if not hasattr(self, "mails"):        # столбцы читаем один раз за запуск
+                self.mails = self._call(self.ws.col_values, self.col["Почта"])
+                self.notes = self._call(self.ws.col_values, self.col["Заметки"])
+            rows = [i for i, m in enumerate(self.mails, 1)
                     if i > 1 and email.strip().lower() in [x.strip().lower() for x in m.split(";")]]
             if not rows:
                 print(f"  (в таблице нет {email} — пропускаю)")
                 return
             for i in rows:
-                notes = self.ws.cell(i, self.col["Заметки"]).value or ""
+                notes = self.notes[i - 1] if i <= len(self.notes) else ""
                 if note in notes:                     # уже помечено — sync можно гонять сколько угодно
                     print(f"  таблица: строка {i} уже помечена")
                     continue
-                self.ws.update_cell(i, self.col["Статус"], "написали")
-                self.ws.update_cell(i, self.col["Заметки"], f"{notes}; {note}" if notes else note)
+                new_notes = f"{notes}; {note}" if notes else note
+                self._call(self.ws.update_cell, i, self.col["Статус"], "написали")
+                self._call(self.ws.update_cell, i, self.col["Заметки"], new_notes)
+                while len(self.notes) < i:
+                    self.notes.append("")
+                self.notes[i - 1] = new_notes
                 print(f"  таблица: строка {i} → написали")
         except Exception as e:
             print(f"  ⚠ не удалось обновить таблицу для {email}: {type(e).__name__}")
