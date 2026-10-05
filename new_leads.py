@@ -139,6 +139,10 @@ class Registry:
     def at(self, n):
         o = ogrn(self.year2, self.region, n)
         hit = self.cache.get("fns", o)
+        # «Не найдено» кешируем только на сегодня: номер в конце года ещё не выдан,
+        # а завтра под ним может появиться новая компания.
+        if hit is not None and not hit.get("огрн") and hit.get("_miss") != dt.date.today().isoformat():
+            hit = None
         if hit is None:
             for attempt in range(3):
                 try:
@@ -149,12 +153,12 @@ class Registry:
                     time.sleep(5 * (attempt + 1))
             else:
                 return None
-            hit = {} if r is None else {
+            hit = {"_miss": dt.date.today().isoformat()} if r is None else {
                 "огрн": o, "инн": r.get("i"), "компания": r.get("c") or r.get("n"),
                 "зарегистрирована": r.get("r"), "директор": re.sub(r"^[А-ЯЁа-яё ]+:\s*", "", r.get("g") or ""),
                 "t": r.get("t")}
             self.cache.put("fns", o, hit)
-        return hit or None
+        return hit if hit.get("огрн") else None
 
     def date_near(self, n, span=8):
         """Первая существующая запись начиная с n (в нумерации бывают дыры)."""
@@ -460,7 +464,8 @@ def collect(region, since, until, cache, limit=None):
             if limit and len(companies) >= limit:
                 break
         cache.save()
-    log(f"Зарегистрировано за период: {len(companies)}\n")
+    last = companies[-1]["зарегистрирована"] if companies else "—"
+    log(f"Зарегистрировано за период: {len(companies)}, последняя — {last}\n")
     return companies
 
 
@@ -618,8 +623,16 @@ def main():
     log("\n" + "\n".join(f"{k}: {v}" for k, v in meta.items()))
 
     if a.sheet:
-        added = push_sheet(key, a.sheet, leads, meta)
-        log(f"\nВ Google-таблицу добавлено новых: {added}")
+        for attempt in range(4):              # Google иногда рвёт соединение — повторяем
+            try:
+                added = push_sheet(key, a.sheet, leads, meta)
+                log(f"\nВ Google-таблицу добавлено новых: {added}")
+                break
+            except Exception as e:
+                log(f"  Google-таблица: {type(e).__name__}, попытка {attempt + 1} из 4")
+                time.sleep(30 * (attempt + 1))
+        else:
+            log("\nВ Google-таблицу записать не удалось — допишется следующим прогоном")
     if a.out or not a.daily:
         tag = f"{a.region:02d}_{since:%d.%m}-{until:%d.%m.%Y}"
         out = a.out or os.path.expanduser(f"~/Desktop/Work/Новые_без_сайта_{tag}.xlsx")
