@@ -633,6 +633,19 @@ def main():
                 time.sleep(30 * (attempt + 1))
         else:
             log("\nВ Google-таблицу записать не удалось — допишется следующим прогоном")
+    # Очередь рассылки: новые компании с почтой → auto.csv (если есть config.json с mail_dir)
+    cfg_path = os.path.join(here, "config.json")
+    if a.sheet and os.path.exists(cfg_path):
+        cfg = json.load(open(cfg_path))
+        if cfg.get("mail_dir"):
+            try:
+                import gspread, outreach
+                ws = gspread.service_account(filename=key).open_by_key(a.sheet).worksheet("Без сайта")
+                names = outreach.enqueue(ws, cfg["mail_dir"], cfg.get("auto_queue", "auto.csv"))
+                log(f"В очередь рассылки ({cfg.get('auto_queue', 'auto.csv')}) добавлено: {len(names)}"
+                    + (" — " + ", ".join(names) if names else ""))
+            except Exception as e:
+                log(f"Очередь рассылки не обновлена: {type(e).__name__}: {e}")
     if a.out or not a.daily:
         tag = f"{a.region:02d}_{since:%d.%m}-{until:%d.%m.%Y}"
         out = a.out or os.path.expanduser(f"~/Desktop/Work/Новые_без_сайта_{tag}.xlsx")

@@ -249,6 +249,64 @@ class Sheet:
             print(f"  ⚠ не удалось обновить таблицу для {email}: {type(e).__name__}")
 
 
+FORM = re.compile(r"^\s*(ООО|ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ)\s*", re.I)
+NICHE_ALIASES = {"автосервис": "автосервисы"}
+
+
+def name_key(raw: str) -> str:
+    """Ключ для сверки названий: без формы, кавычек и пробелов."""
+    return re.sub(r"[^А-ЯЁA-Z0-9]", "", FORM.sub("", (raw or "").upper()))
+
+
+def pretty_name(raw: str) -> str:
+    """ООО "ГАРАНТ СТРОУ" → ООО «Гарант Строу»; ДВ, СК, ПМ и слова с цифрами — как есть."""
+    core = FORM.sub("", raw.strip()).replace('"', "").replace("«", "").replace("»", "").strip()
+    words = []
+    for j, w in enumerate(core.split()):
+        if w.upper() in ("И", "В", "НА", "ПО") and j:
+            words.append(w.lower())
+        elif re.search(r"\d", w) or len(w) <= 2 or (len(w) == 3 and not re.search(r"[АЕЁИОУЫЭЮЯ]", w.upper())):
+            words.append(w)                   # аббревиатуры: ДВ, СК, СПЦ, ЦСК (три буквы без гласных)
+        else:
+            words.append("-".join(p.upper() if len(p) <= 2 else p.capitalize() for p in w.split("-")))
+    return f"ООО «{' '.join(words)}»"
+
+
+def enqueue(ws, mail_dir: str, queue: str = "auto.csv") -> list[str]:
+    """Компании из таблицы со статусом «новый» и почтой, которых нет ни в одном
+    списке рассылки в mail_dir, дописываются в queue. Возвращает их названия."""
+    folder = Path(os.path.expanduser(mail_dir))
+    known = set()
+    for f in folder.glob("*.csv"):
+        try:
+            rows, _ = read_rows(str(f))
+        except Exception:
+            continue
+        for r in rows:
+            if r.get("email"):
+                known |= {r["email"].strip().lower(), name_key(r.get("name", ""))}
+    values = ws.get_all_values()
+    head = values[0]
+    col = {k: head.index(k) for k in ("Компания", "Зарегистрирована", "Ниша", "Почта", "Статус")}
+    added = []
+    for r in values[1:]:
+        if r[col["Статус"]] != "новый" or not r[col["Почта"]].strip():
+            continue
+        email = r[col["Почта"]].split(";")[0].strip().lower()
+        if email in known or name_key(r[col["Компания"]]) in known:
+            continue                          # уже в каком-то списке — или та же почта у другой компании
+        known |= {email, name_key(r[col["Компания"]])}
+        d, m, y = r[col["Зарегистрирована"]].split(".")
+        added.append({"name": pretty_name(r[col["Компания"]]), "reg_date": f"{y}-{m}-{d}",
+                      "niche": NICHE_ALIASES.get(r[col["Ниша"]], r[col["Ниша"]]), "email": email,
+                      "status": "", "sent_at": "", "message_id": ""})
+    if added:
+        path = folder / queue
+        rows, delimiter = read_rows(str(path)) if path.exists() else ([], ";")
+        write_rows(str(path), rows + added, delimiter)
+    return [a["name"] for a in added]
+
+
 def ru_date(iso: str) -> str:
     y, m, d = iso.split("-")
     return f"{d}.{m}.{y}"
